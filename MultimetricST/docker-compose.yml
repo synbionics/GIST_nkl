@@ -1,0 +1,19 @@
+
+services:
+  mmst:
+    image: infomics/mmst:v1.0
+    container_name: mmst_container
+    ports:
+      - "8008:8008"   # host:container
+    restart: unless-stopped
+    volumes:
+      - .:/workspace   # Mount current folder into container
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
+    environment:
+      - R_HOME=/root/miniconda3/envs/MMST/lib/R
+      - R_LIBS_USER=/root/miniconda3/envs/MMST/lib/R/library
+      - R_LIBS=/root/miniconda3/envs/MMST/lib/R/library
+      - PATH=/root/miniconda3/envs/MMST/bin:/root/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
