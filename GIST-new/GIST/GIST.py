@@ -85,6 +85,22 @@ class GIST () :
 
         self.dim_input = self.features.shape[1]
 
+        # =====================================================================
+        # MODIFICA TESI: GENERAZIONE TARGET QUANTIZZATO A PACCHETTI DISCRETI
+        # =====================================================================
+        # Per la mia modifica, voglio che il target della Loss non sia la matrice 
+        # normalizzata standard (che ha valori continui e complessi), ma una 
+        # versione a 'quanti' interi basata sui pesi originali. 
+        # Prendo quindi 'adj' direttamente da obsm prima che venga normalizzata.
+        
+        adj_raw = torch.tensor(self.adata.obsm['adj'], dtype=torch.float64, device=self.device)
+        self.adj_quantized = self._quantize_adjacency(adj_raw, levels=20)
+        
+        # Stampo un controllo per verificare che i 'quanti' siano stati creati
+        valori_unici = torch.unique(self.adj_quantized)
+        print(f"Quantizzazione completata. Livelli di connessione discreti trovati: {len(valori_unici)}")
+
+        # =====================================================================
         
 
         if issparse(adata.X):
@@ -94,6 +110,31 @@ class GIST () :
         
         self.data= torch.tensor(self.data, dtype=torch.float64, device=self.device)
         
+
+    # NUOVO METODO TESI GHIBULET
+    def _quantize_adjacency(self, A, levels=20):
+        # L'obiettivo e' discretizzare i pesi continui e rumorosi 
+        # in un numero esatto di quanti interi (es. 1, 2, 3 quanti). 
+        # Successivamente, normalizzo (L1) per riga affinche' la rete possa usare 
+        # la KL Divergence su distribuzioni di probabilita' valide e stabili.
+        with torch.no_grad():
+            max_val = torch.max(A)
+            if max_val == 0:
+                return A
+            
+            # Converto i valori continui della matrice in 'quanti' interi
+            A_quanti = torch.round((A / max_val) * levels)
+            
+            # Sommo il numero totale di quanti per ogni riga (dim=1)
+            somma_quanti_per_riga = A_quanti.sum(dim=1, keepdim=True)
+            
+            # Evito divisioni per zero se una riga non ha connessioni
+            somma_quanti_per_riga[somma_quanti_per_riga == 0] = 1.0 
+            
+            # Creo la distribuzione di probabilita' basata sui miei quanti discreti
+            A_distribuzione_quanti = A_quanti / somma_quanti_per_riga
+            
+            return A_distribuzione_quanti
 
 
     def normalize_adj(self, adj):
@@ -133,47 +174,13 @@ class GIST () :
         eps = 1e-10
       
         # Ensure A is a valid probability distribution
-        A = A / (A.sum(dim=1, keepdim=True) + eps)
-
-        # --- INIZIO MODIFICA TESI GHIBULET (Quantized Distributions - ROW-WISE) ---
-        with torch.no_grad(): # Nessun gradiente qui, A è il target
-            # 1. Ordiniamo i valori di A per ogni riga (in ordine crescente)
-            A_sorted, _ = torch.sort(A, dim=1)
-            
-            # 2. Calcoliamo la differenza tra i valori adiacenti riga per riga
-            diffs = torch.diff(A_sorted, dim=1) 
-            
-            # 3. Vogliamo solo le differenze maggiori di epsilon per evitare differenze nulle
-            # Impostiamo le differenze invalide a Infinito in modo che min() le ignori
-            valid_diffs = diffs.clone()
-            valid_diffs[valid_diffs <= eps] = float('inf')
-            
-            # 4. Troviamo la minima differenza valida per ogni riga (il nostro wd per riga)
-            wd_per_row, _ = torch.min(valid_diffs, dim=1, keepdim=True)
-            
-            # 5. Gestione casi limite: se una riga aveva tutti valori uguali, wd sarà infinito. 
-            # In quel caso diamo un quantum di default (es. 1e-5)
-            wd_per_row[torch.isinf(wd_per_row)] = 1e-5
-            
-            # 6. Quantizzazione con broadcasting: A (N, N) diviso per wd_per_row (N, 1)
-            A_quantized = torch.round(A / wd_per_row) * wd_per_row
-            
-            # 7. Ri-normalizziamo per garantire che la somma sia esattamente 1.0
-            A = A_quantized / (A_quantized.sum(dim=1, keepdim=True) + eps)
-        # --- FINE MODIFICA TESI GHIBULET ---
+        #A = A / (A.sum(dim=1, keepdim=True) + eps)     RIDONDANTE
 
         # Ensure W has no zero values before taking log
         W = W.clamp(min=eps)
-        
         # Cross-Entropy Loss: L_CE(A_ij, W_ij)
         ce_loss = F.binary_cross_entropy(W, A, reduction='sum') / (n * n)
-
-        # KL Divergence: D_KL(W_i || A_i) for each row (node)
-        # Ora questa KL sta confrontando W con una Quantized Distribution A!
         kl_loss = F.kl_div(W.log(), A, reduction='batchmean') 
-
-        #print(f"KL Loss: {kl_loss.item()}  || CE Loss: {ce_loss.item()} || Beta: {beta}")
-    
         # Final loss
         loss = ce_loss  + beta * kl_loss 
     
@@ -250,7 +257,7 @@ class GIST () :
 
             # Compute losses
             recon_loss = F.mse_loss(emb, self.data) 
-            loss_GSL = self. Graph_Structural_Learning_loss(self.adj, emb, beta=1) 
+            loss_GSL = self. Graph_Structural_Learning_loss(self.adj_quantized, emb, beta=1) 
             loss_GCL = self. Graph_Contrastive_Learning_loss(pos_score_local[:, 0], pos_score_local[:, 1]) + self. Graph_Contrastive_Learning_loss(pos_score[:, 0], pos_score[:, 1])
 
             loss = lambda_Recon*recon_loss + lambda_GCL*loss_GCL +  lambda_GSL*loss_GSL 

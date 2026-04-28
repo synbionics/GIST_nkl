@@ -115,39 +115,21 @@ class GraphST():
         # Recupero la matrice originale
         adj_raw = self.adata.obsm['adj']
         
-        # --- INIZIO QUANTIZZAZIONE GRAFO SPAZIALE (Ghibulet) ---
+        # --- INIZIO MODIFICA TESI GHIBULET (QUANTIZZAZIONE) ---
         print("Applicazione Quantizzazione Spaziale alla matrice di adiacenza...")
         A_tensor = torch.FloatTensor(adj_raw)
-        eps = 1e-10
         
-        # 1. Normalizziamo riga per riga per farla diventare una pseudo-distribuzione
-        A_tensor = A_tensor / (A_tensor.sum(dim=1, keepdim=True) + eps)
+        # Applichiamo la logica dei quanti discreti
+        A_quantized = self._quantize_adjacency(A_tensor, levels=20)
         
-        # 2. Ordiniamo i valori di A per ogni riga
-        A_sorted, _ = torch.sort(A_tensor, dim=1)
+        # Stampo un controllo per verificare i livelli unici creati
+        valori_unici = torch.unique(A_quantized)
+        print(f"Quantizzazione completata. Livelli discreti trovati: {len(valori_unici)}")
         
-        # 3. Calcoliamo la differenza riga per riga
-        diffs = torch.diff(A_sorted, dim=1)
-        
-        # 4. Differenze valide (> eps)
-        valid_diffs = diffs.clone()
-        valid_diffs[valid_diffs <= eps] = float('inf')
-        
-        # 5. Troviamo wd_per_row
-        wd_per_row, _ = torch.min(valid_diffs, dim=1, keepdim=True)
-        
-        # 6. Gestione infiniti (se una riga è piatta)
-        wd_per_row[torch.isinf(wd_per_row)] = 1e-5
-        
-        # 7. Quantizzazione
-        A_quantized = torch.round(A_tensor / wd_per_row) * wd_per_row
-        
-        # 8. Ri-normalizziamo
-        A_tensor = A_quantized / (A_quantized.sum(dim=1, keepdim=True) + eps)
-        
-        # Salviamo la matrice quantizzata sovrascrivendo quella originale
-        self.adj = A_tensor.numpy()
-        # --- FINE QUANTIZZAZIONE ---
+        # Salviamo la matrice quantizzata sovrascrivendo quella originale.
+        # Deve tornare Numpy array per essere digerita dai preprocess successivi di GraphST.
+        self.adj = A_quantized.numpy()
+        # --- FINE MODIFICA TESI ---
 
         self.graph_neigh = torch.FloatTensor(self.adata.obsm['graph_neigh'].copy() + np.eye(self.adj.shape[0])).to(self.device)
 
@@ -188,7 +170,34 @@ class GraphST():
 
            self.n_cell = adata_sc.n_obs
            self.n_spot = adata.n_obs
+
+    # NUOVO METODO TESI GHIBULET
+    def _quantize_adjacency(self, A, levels=20):
+        # L'obiettivo e' discretizzare i pesi continui e rumorosi 
+        # in un numero esatto di quanti interi (es. 1, 2, 3 quanti). 
+        # Successivamente, normalizzo (L1) per riga in modo che la 
+        # convoluzione sul grafo utilizzi probabilita' stabili e pulite.
+        with torch.no_grad():
+            max_val = torch.max(A)
+            if max_val == 0:
+                return A
             
+            # Converto i valori continui della matrice in 'quanti' interi
+            A_quanti = torch.round((A / max_val) * levels)
+            
+            # Sommo il numero totale di quanti per ogni riga (dim=1)
+            somma_quanti_per_riga = A_quanti.sum(dim=1, keepdim=True)
+            
+            # Evito divisioni per zero se una riga non ha connessioni
+            somma_quanti_per_riga[somma_quanti_per_riga == 0] = 1.0 
+            
+            # Creo la distribuzione basata sui miei quanti discreti
+            A_distribuzione_quanti = A_quanti / somma_quanti_per_riga
+            
+            return A_distribuzione_quanti
+
+
+
     def train(self):
         if self.datatype in ['Stereo', 'Slide']:
            self.model = Encoder_sparse(self.dim_input, self.dim_output, self.graph_neigh).to(self.device)

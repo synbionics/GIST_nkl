@@ -19,7 +19,7 @@ rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda x: None
 device = "cuda" if torch.cuda.is_available() else "cpu"
 seed = 35
 # Il percorso ASSOLUTO dove si trovano ora i tuoi dati su WSL
-BASE_DATA_PATH = "/home/nicolae/TESI/inputs/spatial_data/Data"
+BASE_DATA_PATH = "/home/nicolae/TESI/GIST_nkl/inputs/spatial_data/Data"
 
 def read_adata(path, is_h5ad=False):
     if is_h5ad:
@@ -185,6 +185,34 @@ datasets_to_run.append({
     'is_h5ad': False
 })
 
+# 4. Aggiungiamo Human Limph Node
+datasets_to_run.append({
+    'data_name': 'Human_Lymph_Node', 
+        'data_type': 'Visium', 
+        'refinement': True, 
+        'path': f'{BASE_DATA_PATH}/Human_Lymph_Node', 
+        'is_h5ad': False
+})
+
+# 5. Aggiungiamo Mouse Brain Anterior
+datasets_to_run.append({
+    'data_name': 'Mouse_Brain_Ant', 
+        'data_type': 'Visium', 
+        'refinement': True, 
+        'path': f'{BASE_DATA_PATH}/Mouse_Brain_Ant', 
+        'is_h5ad': False
+})
+
+# 6. Aggiungiamo Mouse Kidney
+datasets_to_run.append({
+    'data_name': 'Mouse_Kidney', 
+        'data_type': 'Visium', 
+        'refinement': True, 
+        'path': f'{BASE_DATA_PATH}/Mouse_Kidney', 
+        'is_h5ad': False
+})
+
+
 # =====================================================================
 # MOTORE DI ADDESTRAMENTO AUTOMATICO (IL LOOP)
 # =====================================================================
@@ -205,11 +233,11 @@ for ds in datasets_to_run:
     print(f"INIZIO ELABORAZIONE DATASET: {data_name} (MODELLO NUOVO)")
     print(f"{'='*70}\n")
     
-    # 1. Caricamento Dati
+    # Caricamento Dati
     adata = get_adata(path, data_name, is_h5ad=is_h5ad)
     adata_raw = adata.copy()
     
-    # 2. Addestramento GIST
+    # Addestramento GIST
     start_time = time.time()
     tracemalloc.start()
 
@@ -223,10 +251,10 @@ for ds in datasets_to_run:
     print(f"Tempo di esecuzione ({data_name}): {end_time - start_time:.4f} secondi")
     print(f"Picco memoria ({data_name}): {peak / 10**6:.4f} MB")   
 
-    # 3. Salvataggio Pre-Clustering
+    # Salvataggio Pre-Clustering
     #adata.write_h5ad(f"{PREPROCESSED_DIR}/{data_name}_nuovo.h5ad")
 
-    # 4. Clustering e Plot
+    # Clustering e Plot
     n_cluster, plot_size = get_cluster_size(data_name)
     adata = clustering_method(adata, n_pca=20, num_cluster=n_cluster, refinement=refinement, seed=seed)
     
@@ -234,7 +262,7 @@ for ds in datasets_to_run:
     nome_immagine = f"outputs/{data_name}_nuovo.png"
     plot_cluster(adata, nome_immagine, plot_size=plot_size)
     
-    # 5. Valutazione Metriche
+    # Valutazione Metriche
     metriche_interne = evaluate_cluster(adata, is_visium=GISTModel.is_visium)
 
     # Salvataggio in un file di testo 
@@ -246,15 +274,15 @@ for ds in datasets_to_run:
         file_txt.write(f"Risultati Clustering: {metriche_interne}\n")
         file_txt.write(f"{'-'*50}\n\n")
 
-    # 6. Pulizia e Salvataggio Post-Clustering
+    # Pulizia e Salvataggio Post-Clustering
     adata_raw.obs['cluster'] = '-1'
     common = adata.obs_names.intersection(adata_raw.obs_names)
     adata_raw.obs.loc[common, 'cluster'] = adata.obs.loc[common, 'cluster'].values
     adata_raw.uns['GIST_emb'] = adata.obsm['GIST_emb']
 
-    # NOTA: Salviamo adata_raw così mantiene i dati originali puliti assieme alle etichette del cluster
+    # Salviamo adata_raw così mantiene i dati originali puliti assieme alle etichette del cluster
     adata_raw.write_h5ad(f"{PREPROCESSED_DIR}/{data_name}_final_nuovo.h5ad")
     
     print(f"Dataset {data_name} completato con successo\n")
 
-print("TUTTI E 14 I DATASET SONO STATI ELABORATI")
+print("TUTTI I DATASET SONO STATI ELABORATI")

@@ -23,7 +23,7 @@ from GraphST.utils import clustering
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(f"Utilizzo del dispositivo: {device}")
 
-base_dir = "/home/nicolae/TESI/inputs/spatial_data/Data"
+base_dir = "/home/nicolae/TESI/GIST_nkl/inputs/spatial_data/Data"
 preprocessed_dir = os.path.join(base_dir, "Preprocessed")
 dlpfc_samples = ["151507", "151508", "151509", "151510", "151669", "151670", "151671", "151672", "151673", "151674", "151675", "151676"]
 
@@ -31,6 +31,9 @@ dlpfc_samples = ["151507", "151508", "151509", "151510", "151669", "151670", "15
 datasets = [os.path.join(base_dir, "1.DLPFC", sample) for sample in dlpfc_samples]
 datasets.append(os.path.join(base_dir, "3.Human_Breast_Cancer"))
 datasets.append(os.path.join(base_dir, "Human_Ovarian_Cancer"))
+datasets.append(os.path.join(base_dir, "Human_Lymph_Node"))
+datasets.append(os.path.join(base_dir, "Mouse_Brain_Ant"))
+datasets.append(os.path.join(base_dir, "Mouse_Kidney"))
 
 # Creiamo la cartella di output per le immagini/log e quella per gli h5ad se non esistono
 output_dir = "outputs"

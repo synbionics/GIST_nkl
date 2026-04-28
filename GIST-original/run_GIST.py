@@ -8,13 +8,22 @@ import torch
 import time
 import tracemalloc
 
+
+# =====================================================================
+# IMPOSTAZIONI GLOBALI
+# =====================================================================
+device = "cuda" if torch.cuda.is_available() else "cpu"
+seed = 35
+# Percorso base dove si trovano i dati
+BASE_DATA_PATH = "/home/nicolae/TESI/GIST_nkl/inputs/spatial_data/Data"
+
 def read_adata(path, is_h5ad=False):
-    #Todo: add check if Visium, if 'filtered_feature_bc_matrix.h5' or 'data_name_filtered_feature_bc_matrix.h5'
     if is_h5ad:
         adata = sc.read_h5ad(path)
         adata.var_names_make_unique()
         adata.obsm["spatial"]=adata.obsm["spatial"].astype(float)
     else: 
+        # Carica Visium con il nome file corretto (quello che abbiamo rinominato)
         adata = sc.read_visium(path, count_file='filtered_feature_bc_matrix.h5', load_images=True)
         adata.var_names_make_unique()
         adata.obsm["spatial"]=adata.obsm["spatial"].astype(float)
@@ -60,17 +69,8 @@ def fromlayerstonumberMVC(adata):
 ).astype(str)
 
 def get_adata(path='',data_name='',  is_h5ad=False):
-
-
-    if path=='':
-        adata =read_adata('inputs/spatial_data/Data/1.DLPFC/151673' )
-        annotation_path="inputs/spatial_data/Data/1.DLPFC/151673/metadata.tsv"
-        df_meta = pd.read_csv(annotation_path, sep='\t')
-        df_meta_layer = df_meta['layer_guess']
-        adata.obs['ground_truth'] = fromlayerstonumber (df_meta_layer.values)  
-    else:
-        adata =read_adata(path, is_h5ad)
-        print("data name:", data_name)
+    adata = read_adata(path, is_h5ad)
+    print("data name:", data_name)
 
     if "Human_Breast_Cancer" in data_name :
         df_meta = pd.read_csv(f"{path}/metadata.tsv", sep='\t')
@@ -94,6 +94,18 @@ def get_adata(path='',data_name='',  is_h5ad=False):
     elif "Mouse_Visual_Cortex" in data_name: 
         fromlayerstonumberMVC (adata)  
         print(f"Data {data_name} contains annotation")
+    elif "Mouse_Brain_Ant" in data_name:
+        if os.path.exists(f"{path}/metadata.tsv"):
+            df_meta = pd.read_csv(f"{path}/metadata.tsv", sep='\t')
+            df_meta_layer = df_meta['ground_truth']       
+            adata.obs['ground_truth'] = np.array(fromlayerstonumberMBA(df_meta_layer)).astype(str) 
+            print(f"Data {data_name} contains annotation")
+    elif "Human_Lymph_Node" in data_name or "Mouse_Kidney" in data_name:
+        # Solitamente non hanno ground truth standard, saltiamo o cerchiamo se presente
+        if 'ground_truth' in adata.obs:
+            print(f"Data {data_name} contains annotation")
+        else:
+            print(f"Data {data_name} does not have annotation")
     elif 'ground_truth' in adata.obs and len(adata.obs['ground_truth']):
          print(f"Data {data_name} contains annotation")
     else: 
@@ -137,17 +149,33 @@ def get_cluster_size(data_name):
 
 
 # =====================================================================
-# IMPOSTAZIONI GLOBALI
-# =====================================================================
-#device = "cuda" if torch.cuda.is_available() else "cpu"
-device = "cpu"  # Forza l'esecuzione esclusivamente su CPU
-seed = 35
-
-# =====================================================================
 # CREAZIONE AUTOMATICA DELLA LISTA DATASET (Basata sulle tue cartelle)
 # =====================================================================
-datasets_to_run = []
+datasets_to_run = [
+    {
+        'data_name': 'Mouse_Kidney', 
+        'data_type': 'Visium', 
+        'refinement': True, 
+        'path': f'{BASE_DATA_PATH}/Mouse_Kidney', 
+        'is_h5ad': False
+    },
+    {
+        'data_name': 'Mouse_Brain_Ant', 
+        'data_type': 'Visium', 
+        'refinement': True, 
+        'path': f'{BASE_DATA_PATH}/Mouse_Brain_Ant', 
+        'is_h5ad': False
+    },
+    {
+        'data_name': 'Human_Lymph_Node', 
+        'data_type': 'Visium', 
+        'refinement': True, 
+        'path': f'{BASE_DATA_PATH}/Human_Lymph_Node', 
+        'is_h5ad': False
+    }
+]
 
+"""
 # 1. Generiamo in automatico i percorsi per tutti i 12 campioni DLPFC
 dlpfc_samples = ['151507', '151508', '151509', '151510', 
                  '151669', '151670', '151671', '151672', 
@@ -179,10 +207,14 @@ datasets_to_run.append({
     'path': 'inputs/spatial_data/Data/Human_Ovarian_Cancer', 
     'is_h5ad': False
 })
+"""
 
-# =====================================================================
-# MOTORE DI ADDESTRAMENTO AUTOMATICO (IL LOOP)
-# =====================================================================
+# =============================
+# MOTORE DI ADDESTRAMENTO 
+# =============================
+os.makedirs(f"{BASE_DATA_PATH}/Preprocessed", exist_ok=True)
+os.makedirs("outputs", exist_ok=True)
+
 for ds in datasets_to_run:
     data_name = ds['data_name']
     data_type = ds['data_type']
@@ -194,11 +226,11 @@ for ds in datasets_to_run:
     print(f"INIZIO ELABORAZIONE DATASET: {data_name} (MODELLO ORIGINALE)")
     print(f"{'='*70}\n")
     
-    # 1. Caricamento Dati
+    # Caricamento Dati
     adata = get_adata(path, data_name, is_h5ad=is_h5ad)
     adata_raw = adata.copy()
     
-    # 2. Addestramento GIST
+    # Addestramento GIST
     start_time = time.time()
     tracemalloc.start()
 
@@ -212,22 +244,26 @@ for ds in datasets_to_run:
     print(f"Tempo di esecuzione ({data_name}): {end_time - start_time:.4f} secondi")
     print(f"Picco memoria ({data_name}): {peak / 10**6:.4f} MB")   
 
-    # 3. Salvataggio Pre-Clustering
-    os.makedirs("inputs/spatial_data/Data/Preprocessed", exist_ok=True)
-    adata.write_h5ad(f"inputs/spatial_data/Data/Preprocessed/{data_name}_originale.h5ad")
+    # Salvataggio Pre-Clustering
+    #os.makedirs("inputs/spatial_data/Data/Preprocessed", exist_ok=True)
+    #adata.write_h5ad(f"inputs/spatial_data/Data/Preprocessed/{data_name}_originale.h5ad")
 
-    # 4. Clustering e Plot
+    # Clustering e Plot
     n_cluster, plot_size = get_cluster_size(data_name)
     adata = clustering_method(adata, n_pca=20, num_cluster=n_cluster, refinement=refinement, seed=seed)
     
-    # SALVATAGGIO IMMAGINE DINAMICO (NON SOVRASCRIVE)
+    # SALVATAGGIO IMMAGINE DINAMICO
     nome_immagine = f"outputs/{data_name}_originale.png"
     plot_cluster(adata, nome_immagine, plot_size=plot_size)
     
-    # 5. Valutazione Metriche
-    evaluate_cluster(adata, is_visium=GISTModel.is_visium)
+    # Valutazione Metriche
+    metriche = evaluate_cluster(adata, is_visium=GISTModel.is_visium)
 
-    # 6. Pulizia e Salvataggio Post-Clustering
+    # Salvataggio metriche in file di testo dedicato
+    with open("outputs/GIST-original_metriche.txt", "a") as f:
+        f.write(f"Dataset: {data_name} | Tempo: {end_time-start_time:.2f}s | Metriche: {metriche}\n")
+
+    # Pulizia e Salvataggio Post-Clustering
     adata_raw.obs['cluster'] = '-1'
     common = adata.obs_names.intersection(adata_raw.obs_names)
     adata_raw.obs.loc[common, 'cluster'] = adata.obs.loc[common, 'cluster'].values
@@ -237,4 +273,4 @@ for ds in datasets_to_run:
     
     print(f"Dataset {data_name} completato con successo\n")
 
-print("TUTTI E 14 I DATASET SONO STATI ELABORATI")
+print("TUTTI I DATASET SONO STATI ELABORATI")
