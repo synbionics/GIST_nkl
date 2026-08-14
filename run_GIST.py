@@ -7,6 +7,17 @@ from GIST.GIST import GIST
 import torch
 import time
 import tracemalloc
+import os
+import matplotlib.pyplot as plt
+
+# =====================================================================
+# IMPOSTAZIONI GLOBALI
+# =====================================================================
+device = "cpu"
+seed = 35
+sc.settings.autoshow = False
+# Percorso base dove si trovano i dati
+BASE_DATA_PATH = "../inputs/spatial_data/Data"
 
 def read_adata(path, is_h5ad=False):
     #Todo: add check if Visium, if 'filtered_feature_bc_matrix.h5' or 'data_name_filtered_feature_bc_matrix.h5'
@@ -60,27 +71,13 @@ def fromlayerstonumberMVC(adata):
 ).astype(str)
 
 def get_adata(path='',data_name='',  is_h5ad=False):
-
-
-    if path=='':
-        adata =read_adata('inputs/spatial_data/Data/1.DLPFC/151673' )
-        annotation_path="inputs/spatial_data/Data/1.DLPFC/151673/metadata.tsv"
-        df_meta = pd.read_csv(annotation_path, sep='\t')
-        df_meta_layer = df_meta['layer_guess']
-        adata.obs['ground_truth'] = fromlayerstonumber (df_meta_layer.values)  
-    else:
-        adata =read_adata(path, is_h5ad)
-        print("data name:", data_name)
+    adata = read_adata(path, is_h5ad)
+    print("data name:", data_name)
 
     if "Human_Breast_Cancer" in data_name :
         df_meta = pd.read_csv(f"{path}/metadata.tsv", sep='\t')
         df_meta_layer = df_meta['fine_annot']
         adata.obs['ground_truth'] =df_meta_layer.values 
-        print(f"Data {data_name} contains annotation")
-    elif "Mouse_Brain_Anterior" in data_name:
-        df_meta = pd.read_csv(f"{path}/metadata.tsv", sep='\t')
-        df_meta_layer = df_meta['ground_truth']       
-        adata.obs['ground_truth'] = np.array(fromlayerstonumberMBA (df_meta_layer)).astype(str) 
         print(f"Data {data_name} contains annotation")
     elif "DLPFC" in data_name: 
         annotation_path= f"{path}/metadata.tsv"
@@ -94,6 +91,18 @@ def get_adata(path='',data_name='',  is_h5ad=False):
     elif "Mouse_Visual_Cortex" in data_name: 
         fromlayerstonumberMVC (adata)  
         print(f"Data {data_name} contains annotation")
+    elif "Mouse_Brain_Ant" in data_name:
+        if os.path.exists(f"{path}/metadata.tsv"):
+            df_meta = pd.read_csv(f"{path}/metadata.tsv", sep='\t')
+            df_meta_layer = df_meta['ground_truth']       
+            adata.obs['ground_truth'] = np.array(fromlayerstonumberMBA(df_meta_layer)).astype(str) 
+            print(f"Data {data_name} contains annotation")
+    elif "Human_Lymph_Node" in data_name or "Mouse_Kidney" in data_name:
+        # Solitamente non hanno ground truth standard, saltiamo o cerchiamo se presente
+        if 'ground_truth' in adata.obs:
+            print(f"Data {data_name} contains annotation")
+        else:
+            print(f"Data {data_name} does not have annotation")
     elif 'ground_truth' in adata.obs and len(adata.obs['ground_truth']):
          print(f"Data {data_name} contains annotation")
     else: 
@@ -136,93 +145,99 @@ def get_cluster_size(data_name):
     return n_cluster, plot_size
 
 
-device =  "cuda" if torch.cuda.is_available() else "cpu"
-#device =   "cpu"
+# =====================================================================
+# CREAZIONE AUTOMATICA DELLA LISTA DATASET
+# =====================================================================
+
+datasets_to_run = []
+"""
+# 1. Generiamo in automatico i percorsi per tutti i 12 campioni DLPFC
+dlpfc_samples = ['151507', '151508', 
+                 '151509', '151510', 
+                 '151669', '151670', '151671', '151672', 
+                 '151673', '151674', '151675', '151676']
+
+for sample in dlpfc_samples:
+    datasets_to_run.append({
+        'data_name': f'DLPFC_{sample}', 
+        'data_type': 'Visium', 
+        'refinement': True, 
+        'path': f'{BASE_DATA_PATH}/1.DLPFC/{sample}', 
+        'is_h5ad': False
+    })
+"""
+datasets_to_run.extend([
+    #{'data_name': 'Human_Breast_Cancer', 'data_type': 'Visium', 'refinement': True, 'path': f'{BASE_DATA_PATH}/3.Human_Breast_Cancer', 'is_h5ad': False},
+    #{'data_name': 'Human_Ovarian_Cancer', 'data_type': 'Visium', 'refinement': True, 'path': f'{BASE_DATA_PATH}/Human_Ovarian_Cancer', 'is_h5ad': False},
+    #{'data_name': 'Mouse_Kidney', 'data_type': 'Visium', 'refinement': True, 'path': f'{BASE_DATA_PATH}/Mouse_Kidney', 'is_h5ad': False},
+    {'data_name': 'Mouse_Brain_Anterior', 'data_type': 'Visium', 'refinement': True, 'path': f'{BASE_DATA_PATH}/Mouse_Brain_Ant', 'is_h5ad': False},
+    {'data_name': 'Human_Lymph_Node', 'data_type': 'Visium', 'refinement': True, 'path': f'{BASE_DATA_PATH}/Human_Lymph_Node', 'is_h5ad': False}
+])
 
 
-seed=35
+# =============================
+# MOTORE DI ADDESTRAMENTO 
+# =============================
+os.makedirs(f"{BASE_DATA_PATH}/Preprocessed", exist_ok=True)
+os.makedirs("outputs", exist_ok=True)
 
-""" data_name='Mouse_Brain_Anterior' 
-data_type='Visium'
-refinement=True
-adata=get_adata('inputs/spatial_data/Data/2.Mouse_Brain_Anterior', data_name, is_h5ad=False) 
-  """
-
-data_name='DLPFC_151673' 
-data_type='Visium'
-refinement=True
-adata=get_adata('Data/DLPFC/151673', data_name, is_h5ad=False) 
-
-
-
-""" data_name='DLPFC_151673' 
-data_type='Visium'
-refinement=True
-adata=get_adata('inputs/spatial_data/Data/1.DLPFC/151673', data_name, is_h5ad=False) 
- """
-
-""" data_name='DLPFC_151510' 
-data_type='Visium'
-refinement=True
-adata=get_adata('inputs/spatial_data/Data/1.DLPFC/151510', data_name, is_h5ad=False) 
- """
-
-""" data_name='DLPFC_151674' 
-data_type='Visium'
-refinement=True
-adata=get_adata('inputs/spatial_data/Data/1.DLPFC/151674', data_name, is_h5ad=False) 
- """
-
-""" data_name='Human_Breast_Cancer' 
-data_type='Visium'
-refinement=True
-adata=get_adata('inputs/spatial_data/Data/3.Human_Breast_Cancer', data_name, is_h5ad=False) 
- """
-
-""" data_name='Axolotl_Brain' 
-data_type='Stereo-seq'
-refinement=False
-device =   "cpu"
-adata=get_adata('inputs/spatial_data/Data/Stereo/Stereo_Axolotl_Brain.h5ad', data_name, is_h5ad=True) 
- """
-
-""" data_name='Mouse_Visual_Cortex' 
-data_type='STARmap'
-refinement=True
-adata=get_adata('inputs/spatial_data/Data/14.STARmap_mouse_visual_cortex/STARmap_20180505_BY3_1k.h5ad', data_name, is_h5ad=True) 
- """
-adata_raw=adata.copy()
-# Start measuring time and memory
-start_time = time.time()
-tracemalloc.start()
-
-GISTModel=GIST(adata=adata , device=device, random_seed=seed, data_type=data_type)
-adata=GISTModel.train()
-
-current, peak = tracemalloc.get_traced_memory()
-end_time = time.time()
-tracemalloc.stop()
-
-print(f"Execution time: {end_time - start_time:.4f} seconds")
-print(f"Current memory usage: {current / 10**6:.4f} MB")
-print(f"Peak memory usage: {peak / 10**6:.4f} MB")   
-
-os.makedirs("inputs/spatial_data/Data/Preprocessed", exist_ok=True )
+for ds in datasets_to_run:
+    data_name = ds['data_name']
+    data_type = ds['data_type']
+    refinement = ds['refinement']
+    path = ds['path']
+    is_h5ad = ds['is_h5ad']
     
-adata.write_h5ad(f"inputs/spatial_data/Data/Preprocessed/{data_name}.h5ad")
+    print(f"\n{'='*70}")
+    print(f"INIZIO ELABORAZIONE DATASET: {data_name} (MODELLO ORIGINALE)")
+    print(f"{'='*70}\n")
+    
+    # Caricamento Dati
+    adata = get_adata(path, data_name, is_h5ad=is_h5ad)
+    adata_raw = adata.copy()
+    
+    # Addestramento GIST
+    start_time = time.time()
+    tracemalloc.start()
 
-n_cluster, plot_size=get_cluster_size(data_name)
-adata=clustering_method(adata,n_pca=20, num_cluster=n_cluster,refinement=refinement, seed=seed)
-evaluate_cluster(adata, is_visium=GISTModel.is_visium)
-plot_cluster(adata, f"outputs/{data_name}.png", plot_size=plot_size)
+    GISTModel = GIST(adata=adata, device=device, random_seed=seed, data_type=data_type)
+    adata = GISTModel.train()
 
+    current, peak = tracemalloc.get_traced_memory()
+    end_time = time.time()
+    tracemalloc.stop()
 
-# Isolated spots are not considered in the clustering. If necessary copy the cluster label in the raw adata 
-adata_raw.obs['cluster']='-1'
-common = adata.obs_names.intersection(adata_raw.obs_names)
-adata_raw.obs.loc[common, 'cluster'] = adata.obs.loc[common, 'cluster'].values
-adata_raw.uns['GIST_emb']=adata.obsm['GIST_emb']
+    print(f"Tempo di esecuzione ({data_name}): {end_time - start_time:.4f} secondi")
+    print(f"Picco memoria ({data_name}): {peak / 10**6:.4f} MB")   
 
+    # Salvataggio Pre-Clustering
+    #os.makedirs("inputs/spatial_data/Data/Preprocessed", exist_ok=True)
+    #adata.write_h5ad(f"inputs/spatial_data/Data/Preprocessed/{data_name}_nuovo.h5ad")
 
-adata.write_h5ad(f"inputs/spatial_data/Data/Preprocessed/{data_name}.h5ad")
+    # Clustering e Plot
+    n_cluster, plot_size = get_cluster_size(data_name)
+    adata = clustering_method(adata, n_pca=20, num_cluster=n_cluster, refinement=refinement, seed=seed)
+    
+    # SALVATAGGIO IMMAGINE DINAMICO
+    nome_immagine = f"outputs/{data_name}_nuovo.png"
+    plot_cluster(adata, nome_immagine, plot_size=plot_size)
+    plt.close('all')
+    
+    # Valutazione Metriche
+    metriche = evaluate_cluster(adata, is_visium=GISTModel.is_visium)
 
+    # Salvataggio metriche in file di testo dedicato
+    with open("outputs/GIST-new_metriche.txt", "a") as f:
+        f.write(f"Dataset: {data_name} | Tempo: {end_time-start_time:.2f}s | Metriche: {metriche}\n")
+
+    # Pulizia e Salvataggio Post-Clustering
+    adata_raw.obs['cluster'] = '-1'
+    common = adata.obs_names.intersection(adata_raw.obs_names)
+    adata_raw.obs.loc[common, 'cluster'] = adata.obs.loc[common, 'cluster'].values
+    adata_raw.uns['GIST_emb'] = adata.obsm['GIST_emb']
+
+    adata.write_h5ad(f"inputs/spatial_data/Data/Preprocessed/{data_name}_final_new.h5ad")
+    
+    print(f"Dataset {data_name} completato con successo\n")
+
+print("TUTTI I DATASET SONO STATI ELABORATI")

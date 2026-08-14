@@ -39,9 +39,6 @@ class GIST () :
             self.emb_size = 20
             self.use_sparse =True
 
-       
-           
-
         self.random_seed = random_seed
    
         set_seed(self.random_seed)
@@ -50,6 +47,19 @@ class GIST () :
 
         
         self.device = device
+
+
+
+        # LOGICA QUANTIZZAZIONE GHIBULET
+        adj_raw = torch.tensor(self.adata.obsm['adj'], dtype=torch.float64, device=self.device)
+        self.adj_quantized = self._quantize_adjacency(adj_raw, levels=20)
+        
+        # Monitoraggio (utile per il log)
+        valori_unici = torch.unique(self.adj_quantized)
+        print(f"Quantizzazione completata. Livelli discreti trovati: {len(valori_unici)}")
+
+
+
         self.learning_rate=learning_rate
         self.weight_decay=weight_decay
         self.epochs=epochs
@@ -85,15 +95,39 @@ class GIST () :
 
         self.dim_input = self.features.shape[1]
 
-        
-
         if issparse(adata.X):
             self.data = pca(self.adata.X.toarray(),n_components=self.emb_size) 
         else:
             self.data = pca(self.adata.X,n_components=self.emb_size)  #if data already a matrix
         
         self.data= torch.tensor(self.data, dtype=torch.float64, device=self.device)
-        
+    
+    
+
+
+    #TESI GHIBULET
+    def _quantize_adjacency(self, A, levels=20):
+        # L'obiettivo è discretizzare i pesi continui e rumorosi 
+        # in un numero esatto di quanti interi (es. 1, 2, 3 quanti). 
+        # Successivamente, normalizzo (L1) per riga affinché la rete possa usare 
+        # la KL Divergence su distribuzioni di probabilità valide e stabili.
+        with torch.no_grad():
+            max_val = torch.max(A)
+            if max_val == 0:
+                return A
+            
+            # Trasformazione in quanti discreti
+            A_quanti = torch.round((A / max_val) * levels)
+            
+            # Normalizzazione per riga (necessaria per KL Divergence)
+            somma_quanti_per_riga = A_quanti.sum(dim=1, keepdim=True)
+            somma_quanti_per_riga[somma_quanti_per_riga == 0] = 1.0 
+            
+            A_distribuzione_quanti = A_quanti / somma_quanti_per_riga
+            return A_distribuzione_quanti
+
+
+
 
 
     def normalize_adj(self, adj):
@@ -133,7 +167,8 @@ class GIST () :
         eps = 1e-10
       
         # Ensure A is a valid probability distribution
-        A = A / (A.sum(dim=1, keepdim=True) + eps)
+        #A = A / (A.sum(dim=1, keepdim=True) + eps)
+        #commento perche' la matrice e' gia' normalizzata
 
         # Ensure W has no zero values before taking log
         W = W.clamp(min=eps)
@@ -222,7 +257,7 @@ class GIST () :
 
             # Compute losses
             recon_loss = F.mse_loss(emb, self.data) 
-            loss_GSL = self. Graph_Structural_Learning_loss(self.adj, emb, beta=1) 
+            loss_GSL = self. Graph_Structural_Learning_loss(self.adj_quantized, emb, beta=1) 
             loss_GCL = self. Graph_Contrastive_Learning_loss(pos_score_local[:, 0], pos_score_local[:, 1]) + self. Graph_Contrastive_Learning_loss(pos_score[:, 0], pos_score[:, 1])
 
             loss = lambda_Recon*recon_loss + lambda_GCL*loss_GCL +  lambda_GSL*loss_GSL 
